@@ -271,24 +271,154 @@ function initScene() {
   controls.target.set(0, 0, 0); // 控制器的目标点，相机围绕此点旋转
   controls.update(); // 首次更新，应用设置
 
-  // --- 光照系统 ---
-  // AmbientLight: 环境光，均匀照亮所有表面，无方向，用于提亮阴影区域
-  scene.add(new THREE.AmbientLight(0x404060, 0.9));
-  // HemisphereLight: 半球光，从天空(上)和地面(下)两个方向照射，模拟自然天光
-  scene.add(new THREE.HemisphereLight(0x87ceeb, 0x444422, 0.6));
-  // DirectionalLight: 平行光，模拟太阳，有方向、产生阴影
-  const sun = new THREE.DirectionalLight(0xffeedd, 1.5);
-  sun.position.set(5, 10, 5); // 光源位置
-  sun.castShadow = true; // 开启阴影投射
-  sun.shadow.mapSize.width = 1024; // 阴影贴图分辨率
-  sun.shadow.mapSize.height = 1024;
+  // --- 光照系统（提亮整体场景） ---
+  // AmbientLight: 环境光，均匀照亮所有表面，提高整体亮度(颜色更暖、强度更高)
+  scene.add(new THREE.AmbientLight(0xffffff, 1.6));
+  // HemisphereLight: 半球光，天空(浅蓝) → 地面(暖灰)，模拟自然天光
+  scene.add(new THREE.HemisphereLight(0xadd8e6, 0x888888, 1.2));
+  // DirectionalLight: 主平行光，从右上方向左下方照射，产生立体感和阴影
+  const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+  sun.position.set(8, 15, 10); // 光源位置(抬高并拉远，照射更均匀)
+  sun.castShadow = true;
+  sun.shadow.mapSize.width = 2048;
+  sun.shadow.mapSize.height = 2048;
   scene.add(sun);
-  // 补光：从背面补充照明，减少死黑区域
-  const fill = new THREE.DirectionalLight(0x8888ff, 0.3);
-  fill.position.set(-3, 2, -3);
+  // 补光：从背面补充暖色照明，消除死黑
+  const fill = new THREE.DirectionalLight(0xffcc88, 1.0);
+  fill.position.set(-5, 3, -5);
   scene.add(fill);
-  // GridHelper: 网格辅助线，帮助观察空间位置和尺度
-  scene.add(new THREE.GridHelper(20, 20, 0x888888, 0x444444));
+  // 底部反弹光：从下方补充冷色光，照亮底部细节
+  const rim = new THREE.DirectionalLight(0x88ccff, 0.8);
+  rim.position.set(0, -5, 0);
+  scene.add(rim);
+  // GridHelper: 网格辅助线
+  scene.add(new THREE.GridHelper(20, 20, 0x888888, 0x555555));
+
+  // --- 地面: PlaneGeometry + Canvas 生成的地面纹理 ---
+  const groundSize = 40;
+  const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize);
+  // CanvasTexture: 用 canvas 实时生成纹理，不用加载外部图片
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext("2d")!;
+  // 底色 - 深灰混凝土
+  ctx.fillStyle = "#3a3a3a";
+  ctx.fillRect(0, 0, 512, 512);
+  // 细颗粒噪点
+  for (let i = 0; i < 8000; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const brightness = 40 + Math.random() * 50;
+    ctx.fillStyle = `rgb(${brightness},${brightness},${brightness})`;
+    ctx.fillRect(x, y, 2, 2);
+  }
+  // 淡色分割线 - 模拟场地标线
+  ctx.strokeStyle = "rgba(200, 200, 200, 0.08)";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 8; i++) {
+    ctx.beginPath();
+    ctx.moveTo(0, i * 64);
+    ctx.lineTo(512, i * 64);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(i * 64, 0);
+    ctx.lineTo(i * 64, 512);
+    ctx.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping; // S 方向重复
+  texture.wrapT = THREE.RepeatWrapping; // T 方向重复
+  texture.repeat.set(4, 4); // 重复 4×4 次
+  texture.anisotropy = 4; // 各向异性过滤，减少倾斜时的模糊
+
+  const groundMat = new THREE.MeshStandardMaterial({
+    map: texture,
+    color: 0x888888,
+    roughness: 0.9, // 高粗糙度，地面不反光
+    metalness: 0.0, // 非金属
+  });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI / 2; // 平放 (绕 X 轴旋转 -90°)
+  ground.position.y = -0.1; // 略低于网格，防止重叠闪烁
+  ground.receiveShadow = true; // 接收阴影
+  scene.add(ground);
+
+  // --- 坐标轴指示器: ArrowHelper + Canvas 文字标签 ---
+  initAxes();
+}
+
+/** 创建坐标轴指示器 (X红, Y绿, Z蓝) */
+function initAxes() {
+  const length = 5; // 箭头长度
+  const headLength = 0.4; // 箭头头部长
+  const headWidth = 0.2; // 箭头头部宽
+
+  // ArrowHelper(dir, origin, length, color, headLength, headWidth): 创建一个3D箭头
+  scene.add(
+    new THREE.ArrowHelper(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 0),
+      length,
+      0xff4444,
+      headLength,
+      headWidth,
+    ),
+  );
+  scene.add(
+    new THREE.ArrowHelper(
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0, 0, 0),
+      length,
+      0x44ff44,
+      headLength,
+      headWidth,
+    ),
+  );
+  scene.add(
+    new THREE.ArrowHelper(
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 0, 0),
+      length,
+      0x4488ff,
+      headLength,
+      headWidth,
+    ),
+  );
+
+  // 用 Sprite + Canvas 生成文字标签 "X", "Y", "Z"
+  const makeLabel = (
+    text: string,
+    color: string,
+    pos: [number, number, number],
+  ) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d")!;
+    ctx.clearRect(0, 0, 64, 64);
+    ctx.font = "Bold 40px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = color;
+    ctx.fillText(text, 32, 32);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({
+      map: texture,
+      depthTest: false,
+      sizeAttenuation: true,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.set(pos[0], pos[1], pos[2]);
+    sprite.scale.set(1.2, 1.2, 1);
+    scene.add(sprite);
+  };
+
+  makeLabel("X", "#ff4444", [length + 0.8, 0, 0]);
+  makeLabel("Y", "#44ff44", [0, length + 0.8, 0]);
+  makeLabel("Z", "#4488ff", [0, 0, length + 0.8]);
 }
 
 // #endregion
@@ -326,25 +456,34 @@ function loadModel(url: string) {
 
       // Box3.setFromObject(object): 计算对象的包围盒(最小立方体边界)
       const box = new THREE.Box3().setFromObject(craneRoot);
-      const center = box.getCenter(new THREE.Vector3()); // 包围盒中心点
       const size = box.getSize(new THREE.Vector3()); // 包围盒尺寸 {width, height, depth}
       const maxDim = Math.max(size.x, size.y, size.z);
-      const autoScale = maxDim > 0 ? 10 / maxDim : 1; // 自动缩放使最大维度 ≈ 10
+      const autoScale = maxDim > 0 ? 40 / maxDim : 1; // 统一缩放到 40 单位
+
+      console.log(
+        `模型尺寸: ${size.x.toFixed(1)}×${size.y.toFixed(1)}×${size.z.toFixed(1)}, 缩放: ${autoScale.toFixed(3)}`,
+      );
+
+      // 缩放后再重新计算包围盒
+      craneRoot.scale.set(autoScale, autoScale, autoScale);
+      // scene.add 后再算 Box3 能得到世界坐标下的正确包围盒
+      scene.add(craneRoot);
+      const box2 = new THREE.Box3().setFromObject(craneRoot);
+      const center2 = box2.getCenter(new THREE.Vector3());
+      const size2 = box2.getSize(new THREE.Vector3());
+
+      // 整体下移使底部对齐 y=0
+      craneRoot.position.y -= center2.y - size2.y / 2;
+      // XZ 居中
+      craneRoot.position.x -= center2.x;
+      craneRoot.position.z -= center2.z;
+
       scaleFactor.value = autoScale;
 
-      // Vector3.sub(v): 位置偏移，将模型中心移到世界原点
-      craneRoot.position.sub(center);
-      // Vector3.set(x, y, z): 统一缩放模型
-      craneRoot.scale.set(autoScale, autoScale, autoScale);
-      scene.add(craneRoot); // scene.add(): 将模型加入场景
-
-      // 适配相机距离
-      camera.position.set(
-        8 * (1 / autoScale) * 0.3,
-        6 * (1 / autoScale) * 0.3,
-        12 * (1 / autoScale) * 0.3,
-      );
-      controls.target.set(0, 0, 0);
+      // 相机固定距离 + 对准缩放后的模型中部
+      const cameraY = size2.y * 0.6;
+      camera.position.set(40, cameraY, 50);
+      controls.target.set(0, size2.y / 2, 0);
       controls.update();
 
       // ======== 遍历模型，缓存所有有名字的节点供 getObjectByName 使用 ========
